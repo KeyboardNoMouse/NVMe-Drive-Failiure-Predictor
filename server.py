@@ -58,7 +58,7 @@ FAIL_LABELS = {
 }
 
 # ── Train model ────────────────────────────────────────────────────────────
-print("Training Random Forest model …")
+print("Training Random Forest model ...")
 X = df[FEATURE_COLS]
 y = df["Failure_Mode"]
 
@@ -67,7 +67,7 @@ rf = RandomForestClassifier(
     class_weight="balanced", random_state=42, n_jobs=-1,
 )
 rf.fit(X, y)
-print(f"Model ready — classes: {rf.classes_.tolist()}")
+print(f"Model ready - classes: {rf.classes_.tolist()}")
 
 IMPORTANCES = {col: float(rf.feature_importances_[i]) for i, col in enumerate(FEATURE_COLS)}
 
@@ -344,8 +344,8 @@ def model_info():
 if __name__ == "__main__":
     print("\n" + "="*55)
     print("  NVMe Failure Predictor Server")
-    print("  Dashboard  →  http://localhost:5000")
-    print("  Predictor  →  http://localhost:5000/predictor")
-    print("  API docs   →  http://localhost:5000/api/model/info")
+    print("  Dashboard  ->  http://localhost:5000")
+    print("  Predictor  ->  http://localhost:5000/predictor")
+    print("  API docs   ->  http://localhost:5000/api/model/info")
     print("="*55 + "\n")
     app.run(debug=True, host="0.0.0.0", port=5000)

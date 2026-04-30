@@ -104,5 +104,5 @@ model_js = {
 with open("rf_model.json", "w") as f:
     json.dump(model_js, f)
 
-print(f"\nModel exported → rf_model.json  ({len(json.dumps(model_js))//1024} KB)")
+print(f"\nModel exported -> rf_model.json  ({len(json.dumps(model_js))//1024} KB)")
 print("Done! Open nvme_failure_predictor.html in any browser to run predictions.")
