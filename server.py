@@ -102,7 +102,7 @@ def encode_input(d: dict) -> list:
 def index():
     """Serve the dashboard."""
     dashboard_path = os.path.join(BASE_DIR, "dashboard.html")
-    with open(dashboard_path, "r") as f:
+    with open(dashboard_path, "r", encoding="utf-8") as f:
         return f.read()
 
 
@@ -110,7 +110,7 @@ def index():
 def predictor():
     """Serve the original single-drive predictor."""
     path = os.path.join(BASE_DIR, "nvme_failure_predictor.html")
-    with open(path, "r") as f:
+    with open(path, "r", encoding="utf-8") as f:
         return f.read()
 
 
