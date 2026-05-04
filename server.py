@@ -29,7 +29,9 @@ app = Flask(__name__, static_folder="static")
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # ── Load & prepare data ────────────────────────────────────────────────────
-CSV_PATH = os.path.join(BASE_DIR, "NVMe_Drive_Failure_Dataset.csv")
+AUGMENTED_PATH = os.path.join(BASE_DIR, "NVMe_Drive_Failure_Dataset_Augmented.csv")
+ORIGINAL_PATH = os.path.join(BASE_DIR, "NVMe_Drive_Failure_Dataset.csv")
+CSV_PATH = AUGMENTED_PATH if os.path.exists(AUGMENTED_PATH) else ORIGINAL_PATH
 df_raw = pd.read_csv(CSV_PATH)
 
 le_vendor = LabelEncoder()
