@@ -29,7 +29,9 @@ python server.py
 | `server.py` | Flask backend — trains RF model, serves API + pages |
 | `dashboard.html` | Multi-page analytics dashboard (served at `/`) |
 | `nvme_failure_predictor.html` | Single-drive predictor (served at `/predictor`) |
-| `NVMe_Drive_Failure_Dataset.csv` | Training dataset (10,000 drive snapshots) |
+| `NVMe_Drive_Failure_Dataset.csv` | Original training dataset (10,000 drive snapshots) |
+| `NVMe_Drive_Failure_Dataset_Augmented.csv` | Augmented dataset with synthetic Mode 2 & 3 samples |
+| `generate_synthetic.py` | Generates domain-grounded synthetic failure data |
 | `NVMe_Drives.docx` | Problem statement & dataset documentation |
 | `rf_model.json` | Exported RF model for standalone HTML use |
 | `model_data.json` | Feature statistics & mode profiles |
@@ -94,7 +96,7 @@ curl -X POST http://localhost:5000/api/predict \
 | Max Depth | 15 |
 | Class Weighting | Balanced |
 | Test Accuracy | **99.95%** |
-| Training Samples | 10,000 |
+| Training Samples | 10,600 (includes 600 synthetic Mode 2 & 3 samples) |
 | Features | 14 |
 
 ### Failure Modes
@@ -103,6 +105,8 @@ curl -X POST http://localhost:5000/api/predict \
 |------|-------|
 | 0 | Healthy |
 | 1 | Wear-Out Failure (high TBW / life %) |
+| 2 | Thermal Failure (Synthetic) |
+| 3 | Power-Related Failure (Synthetic) |
 | 4 | Controller / Firmware Failure |
 | 5 | Rapid Error Accumulation (Early-Life) |
 
