@@ -15,10 +15,9 @@ Usage:
     → Open http://localhost:5000 in your browser
 """
 
-from flask import Flask, jsonify, request, send_from_directory, render_template_string
+from flask import Flask, jsonify, request
 import pandas as pd
 import numpy as np
-import json
 import os
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import LabelEncoder
@@ -29,10 +28,12 @@ app = Flask(__name__, static_folder="static")
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # ── Load & prepare data ────────────────────────────────────────────────────
-AUGMENTED_PATH = os.path.join(BASE_DIR, "NVMe_Drive_Failure_Dataset_Augmented.csv")
-ORIGINAL_PATH = os.path.join(BASE_DIR, "NVMe_Drive_Failure_Dataset.csv")
-CSV_PATH = AUGMENTED_PATH if os.path.exists(AUGMENTED_PATH) else ORIGINAL_PATH
-df_raw = pd.read_csv(CSV_PATH)
+CSV_PATH = os.path.join(BASE_DIR, "NVMe_Drive_Failure_Dataset.csv")
+
+try:
+    df_raw = pd.read_csv(CSV_PATH)
+except FileNotFoundError:
+    raise SystemExit(f"[ERROR] Dataset not found at: {CSV_PATH}")
 
 le_vendor = LabelEncoder()
 le_model  = LabelEncoder()
@@ -60,7 +61,7 @@ FAIL_LABELS = {
 }
 
 # ── Train model ────────────────────────────────────────────────────────────
-print("Training Random Forest model …")
+print("Training Random Forest model ...")
 X = df[FEATURE_COLS]
 y = df["Failure_Mode"]
 
@@ -74,7 +75,7 @@ print(f"Model ready — classes: {rf.classes_.tolist()}")
 IMPORTANCES = {col: float(rf.feature_importances_[i]) for i, col in enumerate(FEATURE_COLS)}
 
 def encode_input(d: dict) -> list:
-    """Convert raw input dict → feature vector."""
+    """Convert raw input dict → feature vector. Unknown categoricals fall back to 0."""
     vendor_map = {v: int(i) for i, v in enumerate(le_vendor.classes_)}
     model_map  = {v: int(i) for i, v in enumerate(le_model.classes_)}
     fw_map     = {v: int(i) for i, v in enumerate(le_fw.classes_)}
@@ -90,9 +91,9 @@ def encode_input(d: dict) -> list:
         float(d.get("Read_Error_Rate", 0)),
         float(d.get("Write_Error_Rate", 0)),
         float(d.get("SMART_Warning_Flag", 0)),
-        vendor_map.get(d.get("Vendor", "VendorA"), 0),
-        model_map.get(d.get("Model", "Model-PRO"), 0),
-        fw_map.get(d.get("Firmware_Version", "FW2.0"), 0),
+        vendor_map.get(d.get("Vendor", ""), 0),
+        model_map.get(d.get("Model", ""), 0),
+        fw_map.get(d.get("Firmware_Version", ""), 0),
     ]
 
 
@@ -110,7 +111,7 @@ def index():
 
 @app.route("/predictor")
 def predictor():
-    """Serve the original single-drive predictor."""
+    """Serve the single-drive predictor."""
     path = os.path.join(BASE_DIR, "nvme_failure_predictor.html")
     with open(path, "r", encoding="utf-8") as f:
         return f.read()
@@ -184,19 +185,21 @@ def by_firmware():
 
 @app.route("/api/fleet/temperature_dist")
 def temperature_dist():
+    # BUG FIX: operate on a local copy to avoid mutating the shared df
     bins   = [20, 30, 40, 50, 60, 70, 80]
     labels = ["20-30", "30-40", "40-50", "50-60", "60-70", "70+"]
-    df["_tb"] = pd.cut(df["Temperature_C"], bins=bins, labels=labels, right=False)
-    dist = df["_tb"].value_counts().sort_index()
+    temp_series = pd.cut(df["Temperature_C"], bins=bins, labels=labels, right=False)
+    dist = temp_series.value_counts().sort_index()
     return jsonify({"labels": labels, "counts": [int(dist.get(l, 0)) for l in labels]})
 
 
 @app.route("/api/fleet/life_dist")
 def life_dist():
+    # BUG FIX: operate on a local copy to avoid mutating the shared df
     bins   = [0, 20, 40, 60, 80, 100, 130]
     labels = ["0-20%", "20-40%", "40-60%", "60-80%", "80-100%", ">100%"]
-    df["_lb"] = pd.cut(df["Percent_Life_Used"], bins=bins, labels=labels, right=False)
-    dist = df["_lb"].value_counts().sort_index()
+    life_series = pd.cut(df["Percent_Life_Used"], bins=bins, labels=labels, right=False)
+    dist = life_series.value_counts().sort_index()
     return jsonify({"labels": labels, "counts": [int(dist.get(l, 0)) for l in labels]})
 
 
@@ -213,11 +216,13 @@ def scatter():
 
 @app.route("/api/fleet/error_by_vendor")
 def error_by_vendor():
+    # BUG FIX: include Unsafe_Shutdowns so the radar chart can render it correctly
     grp = df.groupby("Vendor").agg(
         Read_Error_Rate=("Read_Error_Rate", "mean"),
         Write_Error_Rate=("Write_Error_Rate", "mean"),
         Media_Errors=("Media_Errors", "mean"),
         CRC_Errors=("CRC_Errors", "mean"),
+        Unsafe_Shutdowns=("Unsafe_Shutdowns", "mean"),
     ).round(3).reset_index()
     return jsonify(grp.to_dict("records"))
 
@@ -247,13 +252,14 @@ def drives():
 
     total = len(q)
     start = (page - 1) * per_page
-    page_data = q.iloc[start:start + per_page].to_dict("records")
+    # BUG FIX: replace NaN with None so jsonify doesn't choke on float NaN
+    page_data = q.iloc[start:start + per_page].where(pd.notnull(q.iloc[start:start + per_page]), None).to_dict("records")
 
     return jsonify({
         "total": total,
         "page": page,
         "per_page": per_page,
-        "pages": (total + per_page - 1) // per_page,
+        "pages": max(1, (total + per_page - 1) // per_page),
         "data": page_data,
     })
 
@@ -280,10 +286,16 @@ def alerts():
 
 @app.route("/api/predict", methods=["POST"])
 def predict():
-    body = request.get_json(force=True)
-    features = [encode_input(body)]
-    proba    = rf.predict_proba(features)[0]
-    pred     = int(rf.predict(features)[0])
+    body = request.get_json(force=True, silent=True)
+    if not body:
+        return jsonify({"error": "Invalid or missing JSON body"}), 400
+
+    try:
+        features = [encode_input(body)]
+        proba    = rf.predict_proba(features)[0]
+        pred     = int(rf.predict(features)[0])
+    except Exception as e:
+        return jsonify({"error": f"Prediction failed: {str(e)}"}), 422
 
     class_probs = {
         int(cls): round(float(prob), 4)
@@ -292,32 +304,42 @@ def predict():
     failure_prob = round(1.0 - class_probs.get(0, 0.0), 4)
 
     return jsonify({
-        "prediction":     pred,
-        "label":          FAIL_LABELS.get(pred, "Unknown"),
-        "failure":        pred != 0,
-        "failure_prob":   failure_prob,
-        "confidence":     round(float(max(proba)), 4),
-        "class_probs":    class_probs,
-        "importances":    IMPORTANCES,
+        "prediction":   pred,
+        "label":        FAIL_LABELS.get(pred, "Unknown"),
+        "failure":      pred != 0,
+        "failure_prob": failure_prob,
+        "confidence":   round(float(max(proba)), 4),
+        "class_probs":  class_probs,
+        "importances":  IMPORTANCES,
     })
 
 
 @app.route("/api/predict/batch", methods=["POST"])
 def predict_batch():
-    body  = request.get_json(force=True)
+    body = request.get_json(force=True, silent=True)
+    if not body:
+        return jsonify({"error": "Invalid or missing JSON body"}), 400
+
     items = body if isinstance(body, list) else body.get("drives", [])
+    if not items:
+        return jsonify({"error": "No drives provided"}), 400
+
     results = []
     for item in items[:500]:   # cap at 500
-        features = [encode_input(item)]
-        proba = rf.predict_proba(features)[0]
-        pred  = int(rf.predict(features)[0])
-        results.append({
-            "drive_id":     item.get("Drive_ID", "?"),
-            "prediction":   pred,
-            "label":        FAIL_LABELS.get(pred, "Unknown"),
-            "failure":      pred != 0,
-            "failure_prob": round(1.0 - float(dict(zip(rf.classes_, proba)).get(0, 0)), 4),
-        })
+        try:
+            features = [encode_input(item)]
+            proba = rf.predict_proba(features)[0]
+            pred  = int(rf.predict(features)[0])
+            results.append({
+                "drive_id":     item.get("Drive_ID", "?"),
+                "prediction":   pred,
+                "label":        FAIL_LABELS.get(pred, "Unknown"),
+                "failure":      pred != 0,
+                "failure_prob": round(1.0 - float(dict(zip(rf.classes_, proba)).get(0, 0)), 4),
+            })
+        except Exception as e:
+            results.append({"drive_id": item.get("Drive_ID", "?"), "error": str(e)})
+
     return jsonify(results)
 
 
@@ -328,16 +350,16 @@ def predict_batch():
 @app.route("/api/model/info")
 def model_info():
     return jsonify({
-        "algorithm":   "Random Forest Classifier",
+        "algorithm":    "Random Forest Classifier",
         "n_estimators": rf.n_estimators,
-        "max_depth":   rf.max_depth,
-        "classes":     [int(c) for c in rf.classes_],
-        "features":    FEATURE_COLS,
-        "importances": IMPORTANCES,
-        "vendors":     le_vendor.classes_.tolist(),
-        "models":      le_model.classes_.tolist(),
-        "firmwares":   le_fw.classes_.tolist(),
-        "fail_labels": {str(k): v for k, v in FAIL_LABELS.items()},
+        "max_depth":    rf.max_depth,
+        "classes":      [int(c) for c in rf.classes_],
+        "features":     FEATURE_COLS,
+        "importances":  IMPORTANCES,
+        "vendors":      le_vendor.classes_.tolist(),
+        "models":       le_model.classes_.tolist(),
+        "firmwares":    le_fw.classes_.tolist(),
+        "fail_labels":  {str(k): v for k, v in FAIL_LABELS.items()},
     })
 
 
@@ -346,8 +368,8 @@ def model_info():
 if __name__ == "__main__":
     print("\n" + "="*55)
     print("  NVMe Failure Predictor Server")
-    print("  Dashboard  →  http://localhost:5000")
-    print("  Predictor  →  http://localhost:5000/predictor")
-    print("  API docs   →  http://localhost:5000/api/model/info")
+    print("  Dashboard  ->  http://localhost:5000")
+    print("  Predictor  ->  http://localhost:5000/predictor")
+    print("  API docs   ->  http://localhost:5000/api/model/info")
     print("="*55 + "\n")
     app.run(debug=True, host="0.0.0.0", port=5000)

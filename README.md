@@ -2,7 +2,7 @@
 
 **SMART Telemetry Analysis · Random Forest Classifier · Flask REST API · 99.95% Accuracy**
 
-A full-stack NVMe drive health monitoring system: a Flask backend serving a 14-endpoint REST API and a rich multi-page analytics dashboard.
+A full-stack NVMe drive health monitoring system: a Flask backend serving a 14-endpoint REST API and a redesigned cyberpunk-style analytics dashboard.
 
 ---
 
@@ -29,9 +29,7 @@ python server.py
 | `server.py` | Flask backend — trains RF model, serves API + pages |
 | `dashboard.html` | Multi-page analytics dashboard (served at `/`) |
 | `nvme_failure_predictor.html` | Single-drive predictor (served at `/predictor`) |
-| `NVMe_Drive_Failure_Dataset.csv` | Original training dataset (10,000 drive snapshots) |
-| `NVMe_Drive_Failure_Dataset_Augmented.csv` | Augmented dataset with synthetic Mode 2 & 3 samples |
-| `generate_synthetic.py` | Generates domain-grounded synthetic failure data |
+| `NVMe_Drive_Failure_Dataset.csv` | Training dataset (10,000 drive snapshots) |
 | `NVMe_Drives.docx` | Problem statement & dataset documentation |
 | `rf_model.json` | Exported RF model for standalone HTML use |
 | `model_data.json` | Feature statistics & mode profiles |
@@ -43,13 +41,34 @@ python server.py
 
 | Page | Description |
 |------|-------------|
-| **Overview** | Fleet KPIs, failure mode donut, vendor bar, temp/life distributions, scatter plot |
+| **Overview** | Fleet KPIs with animated counters, failure mode donut, vendor bar, temp/life distributions, scatter plot |
 | **Fleet Health** | Vendor & model matrix tables, firmware failure rates |
-| **Error Analysis** | Radar chart, read/write error bars, media/CRC by vendor |
+| **Error Analysis** | Radar chart (with Unsafe_Shutdowns fix), read/write error bars, media/CRC by vendor |
 | **Alerts** | SMART-flagged drives sorted by criticality |
 | **Drive Explorer** | Paginated, filterable, sortable full drive table |
-| **Predictor** | Embedded single-drive ML inference tool |
+| **Predictor** | Opens `/predictor` in a new tab (single-drive ML inference) |
 | **Model Info** | RF config, feature importances, full API reference |
+
+---
+
+## Changes & Bug Fixes
+
+### Bug Fixes (`server.py`)
+- **Column mutation bug**: `temperature_dist` and `life_dist` were adding `_tb`/`_lb` columns directly to the shared `df` dataframe on every request. Fixed by operating on the `pd.cut` series directly instead.
+- **Missing `Unsafe_Shutdowns` in error API**: `error_by_vendor` endpoint now returns `Unsafe_Shutdowns` mean so the radar chart renders all 5 axes correctly.
+- **`NaN` serialization**: `/api/drives` now replaces `NaN` with `None` before calling `jsonify` to prevent silent failures with certain datasets.
+- **Batch predict error handling**: Each item in batch prediction is now wrapped in try/except so one bad record doesn't abort the entire batch.
+- **JSON body validation**: `/api/predict` and `/api/predict/batch` now return proper 400/422 errors on missing or malformed bodies.
+- **Unknown categoricals**: `encode_input` now defaults to `0` for unknown vendor/model/firmware strings instead of a potential `KeyError`.
+
+### Dashboard Redesign (`dashboard.html`)
+- Complete visual overhaul: cyberpunk/ops-center aesthetic with Space Mono, Rajdhani & Barlow fonts
+- Animated KPI counters on load
+- Neon glow accents, scanline overlay, grid background
+- Removed duplicate Predictor page — nav item now opens `/predictor` directly in a new tab
+- All chart colors updated to match new palette with proper border glow
+- Improved error handling — all data loads wrapped in try/catch with user-visible error states
+- Vendor names color-coded consistently across tables and charts
 
 ---
 
@@ -65,25 +84,12 @@ python server.py
 | GET | `/api/fleet/temperature_dist` | Temperature distribution buckets |
 | GET | `/api/fleet/life_dist` | Life-used distribution buckets |
 | GET | `/api/fleet/scatter` | Scatter plot data (POH vs life) |
-| GET | `/api/fleet/error_by_vendor` | Error metrics by vendor |
+| GET | `/api/fleet/error_by_vendor` | Error metrics by vendor (incl. Unsafe_Shutdowns) |
 | GET | `/api/drives` | Paginated drive list (filter/sort params) |
 | GET | `/api/alerts` | Top SMART-flagged alert drives |
 | POST | `/api/predict` | Single drive failure prediction |
 | POST | `/api/predict/batch` | Batch prediction (up to 500 drives) |
 | GET | `/api/model/info` | Model metadata & feature importances |
-
-### Example: Predict a drive
-```bash
-curl -X POST http://localhost:5000/api/predict \
-  -H "Content-Type: application/json" \
-  -d '{
-    "Power_On_Hours": 1200, "Total_TBW_TB": 95, "Total_TBR_TB": 80,
-    "Temperature_C": 41, "Percent_Life_Used": 24, "Media_Errors": 1,
-    "Unsafe_Shutdowns": 3, "CRC_Errors": 1, "Read_Error_Rate": 15.5,
-    "Write_Error_Rate": 10.0, "SMART_Warning_Flag": 1,
-    "Vendor": "VendorA", "Model": "Model-X2", "Firmware_Version": "FW1.0"
-  }'
-```
 
 ---
 
@@ -96,7 +102,7 @@ curl -X POST http://localhost:5000/api/predict \
 | Max Depth | 15 |
 | Class Weighting | Balanced |
 | Test Accuracy | **99.95%** |
-| Training Samples | 10,600 (includes 600 synthetic Mode 2 & 3 samples) |
+| Training Samples | 10,000 |
 | Features | 14 |
 
 ### Failure Modes
@@ -105,8 +111,6 @@ curl -X POST http://localhost:5000/api/predict \
 |------|-------|
 | 0 | Healthy |
 | 1 | Wear-Out Failure (high TBW / life %) |
-| 2 | Thermal Failure (Synthetic) |
-| 3 | Power-Related Failure (Synthetic) |
 | 4 | Controller / Firmware Failure |
 | 5 | Rapid Error Accumulation (Early-Life) |
 
